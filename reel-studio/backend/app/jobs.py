@@ -33,3 +33,7 @@ def recover_orphans() -> None:
         for doc in store.list_docs(kind):
             if doc.get("status") in ("processing", "rendering", "uploaded"):
                 store.update(kind, doc["id"], status="failed", message="Interrupted by a server restart. Please retry.")
+    for doc in store.list_docs("explainers"):  # the explanation stays valid; only an unfinished reel is lost
+        if (doc.get("reel") or {}).get("status") == "processing":
+            store.update("explainers", doc["id"], reel={**doc["reel"], "status": "failed", "progress": 0,
+                                                         "message": "Interrupted by a server restart. Please retry."})

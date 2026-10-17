@@ -366,14 +366,31 @@ async def captioned_video(request: Request):
 
 # ------------------------------------------------------------------ explainer
 async def create_explainer(request: Request):
+    """Step 1: the user's text in, the full explanation out (no video yet)."""
     data = await body(request)
-    topic = str(data.get("topic") or "").strip()
-    if not topic:
-        raise HTTPException(400, "Please enter a topic")
+    text = str(data.get("text") or data.get("topic") or "").strip()
+    if not text:
+        raise HTTPException(400, "Please enter some text to explain")
+    if len(text) > explainer.MAX_INPUT_CHARS:
+        raise HTTPException(413, f"Please keep the text under {explainer.MAX_INPUT_CHARS} characters")
     if not llm.available():
-        raise HTTPException(503, "The topic explainer needs ANTHROPIC_API_KEY set in backend/.env")
-    job = explainer.start(topic[:200])
-    return ok({"id": job["id"]})
+        raise HTTPException(503, "The AI explainer needs ANTHROPIC_API_KEY set in backend/.env")
+    try:
+        doc = await run_in_threadpool(explainer.explain, text)
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+    return ok(doc, 201)
+
+
+async def make_explainer_reel(request: Request):
+    """Step 2 (optional): turn the explanation into a reel. Poll GET /explainer/{id} and read `reel`."""
+    try:
+        doc = explainer.start_reel(request.path_params["job_id"])
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return ok(doc)
 
 
 async def get_explainer(request: Request):
@@ -387,7 +404,8 @@ async def explainer_video(request: Request):
     if not p.exists():
         raise HTTPException(404, "Video not ready")
     if request.query_params.get("download"):
-        return FileResponse(p, media_type="video/mp4", filename=f"{job['topic'][:40]}.mp4", content_disposition_type="attachment")
+        name = "".join(c for c in job["explanation"]["title"][:40] if c.isalnum() or c in " -_").strip() or "explainer"
+        return FileResponse(p, media_type="video/mp4", filename=f"{name}.mp4", content_disposition_type="attachment")
     return FileResponse(p, media_type="video/mp4")
 
 
@@ -435,6 +453,7 @@ api_routes = [
     Route("/videos/{video_id}/captioned/video", captioned_video),
     Route("/explainer", create_explainer, methods=["POST"]),
     Route("/explainer/{job_id}", get_explainer), Route("/explainer/{job_id}/video", explainer_video),
+    Route("/explainer/{job_id}/reel", make_explainer_reel, methods=["POST"]),
 ]
 
 routes = [Mount("/api", routes=api_routes)]

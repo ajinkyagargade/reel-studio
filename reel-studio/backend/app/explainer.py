@@ -1,22 +1,45 @@
-"""Topic explainer: topic -> script (Claude) -> animated code slides -> voice-over -> captions -> 9:16 video."""
+"""AI explainer in two steps.
+
+1. explain(text)      -> a full written explanation of whatever the user typed (Claude).
+2. start_reel(id)     -> on request, condense that explanation into a 6-scene script, then
+                         animated slides -> voice-over -> captions -> 9:16 video.
+"""
 import re
 import shutil
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from PIL import Image, ImageDraw, ImageFont
 
 from . import captions, config, jobs, llm, media, options, render, reels, store, tts
 
 W, H = 1080, 1920
-SYSTEM = """You write scripts for 45-second vertical tech explainer videos for developers.
+MAX_INPUT_CHARS = 6000
+
+EXPLAIN_SYSTEM = """You are an expert teacher. The user gives you some text: a topic, a question, a concept, or a passage they
+want to understand. Give a complete, accurate, easy-to-follow explanation of it.
+Reply with ONE JSON object only:
+{"title":"short title",
+ "language":"en|hi|hinglish|...",
+ "tldr":"1-2 sentence gist",
+ "sections":[ {"heading":"short heading",
+               "body":"clear explanation, 2-5 sentences, plain text, paragraphs separated by \\n\\n",
+               "code":"optional code or formula example, max 12 lines, else empty string"} ],
+ "takeaways":["3-6 short takeaways"]}
+Use 4-7 sections that build on each other: what it is, why it matters, how it works, a concrete example, common mistakes
+or edge cases, and when to use it. If the user pasted a passage, explain what it says and what it means rather than only
+repeating it. Be technically accurate and never invent facts. Write in the user's language (Hinglish stays in Latin script)."""
+
+SYSTEM = """You turn a written explanation into the script of a 45-second vertical explainer video.
 Reply with ONE JSON object only:
 {"title":"", "language":"en|hi",
  "scenes":[ {"heading":"max 6 words", "bullets":["max 3 short bullets, max 8 words each"],
              "code":"optional code snippet, max 9 lines, max 30 chars per line, else empty string",
              "narration":"what the voice says, 14-22 words, conversational"} ]}
-Use exactly 6 scenes: 1 hook (a surprising question), 2-5 explain with examples (use code when it helps), 6 takeaway.
-Total narration 105-130 words. Be technically accurate. Write narration in the user's language (Hinglish stays in Latin script)."""
+Use exactly 6 scenes: 1 hook (a surprising question), 2-5 explain the most important ideas of the given explanation
+(use its examples and code when it helps), 6 takeaway.
+Total narration 105-130 words. Stay faithful to the explanation and never add facts that are not in it.
+Write narration in the same language as the explanation (Hinglish stays in Latin script)."""
 
 KW = {"const", "let", "var", "function", "return", "if", "else", "for", "while", "import", "from", "class", "def", "async",
       "await", "new", "true", "false", "null", "None", "True", "False", "in", "of", "export", "default", "try", "catch", "print"}
@@ -95,17 +118,81 @@ def render_slide(scene: Dict, idx: int, total: int, out: Path) -> None:
     img.save(out)
 
 
-def run(job_id: str) -> None:
-    job = store.get("explainers", job_id)
-    topic = job["topic"]
+# ---------------------------------------------------------------- step 1: the explanation
+def _clean_explanation(data: Any, fallback_title: str) -> Dict[str, Any]:
+    if not isinstance(data, dict):
+        raise RuntimeError("The model did not return a usable explanation. Try rephrasing your text.")
+    sections = []
+    for s in data.get("sections") or []:
+        if not isinstance(s, dict):
+            continue
+        body = str(s.get("body") or "").strip()
+        if not body:
+            continue
+        sections.append({
+            "heading": str(s.get("heading") or "").strip()[:120],
+            "body": body,
+            "code": str(s.get("code") or "").strip("\n"),
+        })
+    if not sections:
+        raise RuntimeError("The model did not return a usable explanation. Try rephrasing your text.")
+    return {
+        "title": str(data.get("title") or fallback_title).strip()[:120],
+        "language": str(data.get("language") or "en"),
+        "tldr": str(data.get("tldr") or "").strip(),
+        "sections": sections,
+        "takeaways": [str(t).strip() for t in (data.get("takeaways") or []) if str(t).strip()][:8],
+    }
+
+
+def explain(text: str) -> Dict[str, Any]:
+    """Write the full explanation for the user's text and store it. Raises RuntimeError with a readable message."""
     if not llm.available():
-        raise RuntimeError("The topic explainer needs an Anthropic API key. Set ANTHROPIC_API_KEY in backend/.env and restart.")
-    store.update("explainers", job_id, status="processing", progress=5, message="Writing the script")
-    script = llm.complete_json(SYSTEM, f"Topic: {topic}", max_tokens=3000)
+        raise RuntimeError("The AI explainer needs an Anthropic API key. Set ANTHROPIC_API_KEY in backend/.env and restart.")
+    text = text.strip()[:MAX_INPUT_CHARS]
+    data = llm.complete_json(EXPLAIN_SYSTEM, f"Text to explain:\n\n{text}", max_tokens=4000)
+    explanation = _clean_explanation(data, fallback_title=text[:60])
+    doc = {
+        "id": reels.new_id(), "topic": text, "status": "ready", "createdAt": jobs.now_iso(),
+        "explanation": explanation, "reel": None,
+    }
+    return store.put("explainers", doc["id"], doc)
+
+
+# ---------------------------------------------------------------- step 2: the reel (only when asked)
+def _explanation_as_text(e: Dict[str, Any]) -> str:
+    parts = [f"Title: {e['title']}", f"Summary: {e.get('tldr', '')}"]
+    for s in e["sections"]:
+        parts.append(f"## {s['heading']}\n{s['body']}" + (f"\nExample:\n{s['code']}" if s.get("code") else ""))
+    if e.get("takeaways"):
+        parts.append("Takeaways: " + "; ".join(e["takeaways"]))
+    return "\n\n".join(parts)
+
+
+def _reel_update(job_id: str, **fields: Any) -> None:
+    doc = store.get("explainers", job_id)
+    if doc is not None:
+        store.update("explainers", job_id, reel={**(doc.get("reel") or {}), **fields})
+
+
+def run_reel(job_id: str) -> None:
+    try:
+        _run_reel(job_id)
+    except Exception as e:  # noqa: BLE001 - surface the reason in the UI instead of a silent hang
+        jobs.log.error("explainer reel failed: %s", e)
+        _reel_update(job_id, status="failed", progress=0, message=str(e)[:400])
+
+
+def _run_reel(job_id: str) -> None:
+    job = store.get("explainers", job_id)
+    explanation = job["explanation"]
+    _reel_update(job_id, status="processing", progress=5, message="Writing the reel script")
+    script = llm.complete_json(SYSTEM, _explanation_as_text(explanation), max_tokens=3000)
     scenes_raw = [s for s in script.get("scenes", []) if s.get("narration")][:8]
     if not scenes_raw:
-        raise RuntimeError("The model did not return a usable script. Try rephrasing the topic.")
+        raise RuntimeError("The model did not return a usable reel script. Please try again.")
 
+    topic = explanation["title"]
     work = config.WORK_DIR / f"explainer_{job_id}"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True)
@@ -119,7 +206,7 @@ def run(job_id: str) -> None:
     scenes: List[Dict] = []
     lead, tail = 0.2, 0.6
     for i, sc in enumerate(scenes_raw):
-        store.update("explainers", job_id, progress=int(10 + 30 * i / len(scenes_raw)), message=f"Voice-over {i + 1}/{len(scenes_raw)}")
+        _reel_update(job_id, progress=int(10 + 30 * i / len(scenes_raw)), message=f"Voice-over {i + 1}/{len(scenes_raw)}")
         png = work / f"slide_{i}.png"
         render_slide(sc, i, len(scenes_raw), png)
         audio = tts.synthesize(sc["narration"], voice, 0, work / "tts")
@@ -129,18 +216,26 @@ def run(job_id: str) -> None:
             "words": captions.spread_words(sc["narration"], lead, lead + dur), "has_audio": False,
         })
     out = config.OUTPUT_DIR / f"explainer_{job_id}.mp4"
-    store.update("explainers", job_id, progress=45, message="Rendering video")
-    render.render(scenes, settings, out, work / "r", lambda f, m: store.update("explainers", job_id, progress=int(45 + 54 * f), message=m))
+    _reel_update(job_id, progress=45, message="Rendering video")
+    render.render(scenes, settings, out, work / "r", lambda f, m: _reel_update(job_id, progress=int(45 + 54 * f), message=m))
     shutil.rmtree(work, ignore_errors=True)
-    store.update("explainers", job_id, status="ready", progress=100, message="Done", title=script.get("title", topic),
+    _reel_update(job_id, status="ready", progress=100, message="Done",
                  outputUrl=f"/api/explainer/{job_id}/video?v={int(out.stat().st_mtime)}",
                  downloadUrl=f"/api/explainer/{job_id}/video?download=1")
 
 
-def start(topic: str) -> Dict:
-    job_id = reels.new_id()
-    doc = {"id": job_id, "topic": topic, "status": "processing", "progress": 0, "message": "Queued", "createdAt": jobs.now_iso()}
-    store.put("explainers", job_id, doc)
-    jobs.submit(run, job_id, kind="explainers", doc_id=job_id)
+def start_reel(job_id: str) -> Dict:
+    """Queue the reel for an existing explanation. Raises LookupError / RuntimeError for the API to turn into HTTP errors."""
+    doc = store.get("explainers", job_id)
+    if not doc or not doc.get("explanation"):
+        raise LookupError("Explainer not found")
+    if (doc.get("reel") or {}).get("status") == "processing":
+        raise RuntimeError("The reel is already being made")
+    if not llm.available():
+        raise RuntimeError("Making a reel needs ANTHROPIC_API_KEY set in backend/.env")
+    (config.OUTPUT_DIR / f"explainer_{job_id}.mp4").unlink(missing_ok=True)  # a re-run must not serve the old video
+    doc = store.update("explainers", job_id, reel={"status": "processing", "progress": 0, "message": "Queued",
+                                                    "outputUrl": None, "downloadUrl": None})
+    jobs.submit(run_reel, job_id)
     return doc
 

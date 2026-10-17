@@ -243,15 +243,35 @@ export interface Health {
 }
 
 // ---------- topic explainer ----------
-export interface ExplainerJob {
-  id: string;
-  topic: string;
-  title?: string;
+export interface ExplainerSection {
+  heading: string;
+  body: string;
+  code: string;
+}
+
+export interface Explanation {
+  title: string;
+  language: string;
+  tldr: string;
+  sections: ExplainerSection[];
+  takeaways: string[];
+}
+
+export interface ExplainerReel {
   status: "processing" | "ready" | "failed";
   progress: number;
-  outputUrl?: string;
-  downloadUrl?: string;
   message?: string;
+  outputUrl?: string | null;
+  downloadUrl?: string | null;
+}
+
+export interface ExplainerDoc {
+  id: string;
+  topic: string;
+  status: "ready" | "failed";
+  message?: string;
+  explanation: Explanation;
+  reel: ExplainerReel | null;
 }
 
 export interface CaptionedJob {

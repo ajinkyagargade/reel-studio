@@ -8,7 +8,7 @@ import {
   ReelSettings,
   EditOptions,
   Health,
-  ExplainerJob,
+  ExplainerDoc,
   FontInfo,
   LogoInfo,
   CaptionedJob,
@@ -96,9 +96,13 @@ export const getCaptioned = async (videoId: string): Promise<CaptionedJob> =>
   (await api.get<CaptionedJob>(`/videos/${videoId}/captioned`)).data;
 
 // ========== Topic Explainer APIs ==========
-export const createExplainer = async (topic: string): Promise<{ id: string }> =>
-  (await api.post<{ id: string }>("/explainer", { topic })).data;
-export const getExplainerStatus = async (id: string): Promise<ExplainerJob> =>
-  (await api.get<ExplainerJob>(`/explainer/${id}`)).data;
+/** Step 1: full explanation of the user's text (takes a few seconds). */
+export const createExplainer = async (text: string): Promise<ExplainerDoc> =>
+  (await api.post<ExplainerDoc>("/explainer", { text })).data;
+/** Step 2 (optional): start making a reel from that explanation. */
+export const startExplainerReel = async (id: string): Promise<ExplainerDoc> =>
+  (await api.post<ExplainerDoc>(`/explainer/${id}/reel`)).data;
+export const getExplainer = async (id: string): Promise<ExplainerDoc> =>
+  (await api.get<ExplainerDoc>(`/explainer/${id}`)).data;
 
 export default api;

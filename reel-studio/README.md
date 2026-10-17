@@ -19,7 +19,7 @@ reel-studio/
 | **Live captions** | Captions appear word-by-word over the player in real time with the exact final look. Download `.srt` / `.vtt`, or burn them into the *entire* original video |
 | Caption font & colour | 9 built-in fonts, **upload your own .ttf/.otf**, text / highlight / outline colours, UPPERCASE, background box, 6 presets, position, size |
 | Logo | Upload PNG/JPG/WebP, choose corner or centre, size, opacity; applied to reels and the captioned full video |
-| Topic explainer | Topic → script → code slides → voice → 45s vertical video (needs `ANTHROPIC_API_KEY`) |
+| AI explainer | Type or paste any text → full written explanation → optional **Make a reel** button (script → code slides → voice → 45s vertical video). Needs `ANTHROPIC_API_KEY` |
 
 ## Setup
 
