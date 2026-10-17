@@ -151,13 +151,14 @@ const ReelStudio: React.FC<Props> = ({ video, analysis, options, reel, onReel, o
   const portrait = !reel.width || !reel.height || reel.height >= reel.width;
   const aspectStyle = reel.width && reel.height ? { aspectRatio: `${reel.width} / ${reel.height}` } : { aspectRatio: "9 / 16" };
   const cap = settings.captions;
+  const allTransitions = options.transitions;
   const groupedTransitions = useMemo(() => {
-    const groups: Record<string, typeof options.transitions> = {};
-    options.transitions.forEach((t) => {
+    const groups: Record<string, typeof allTransitions> = {};
+    allTransitions.forEach((t) => {
       (groups[t.group || "Other"] = groups[t.group || "Other"] || []).push(t);
     });
     return groups;
-  }, [options.transitions]);
+  }, [allTransitions]);
 
   return (
     <div className="grid lg:grid-cols-5 gap-6">

@@ -19,7 +19,9 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-DATA_DIR = Path(os.getenv("DATA_DIR", BASE_DIR / "data")).resolve()
+# Vercel's filesystem is read-only except /tmp, so default there (data is then temporary and per-instance).
+_default_data = Path("/tmp/reelstudio") if os.getenv("VERCEL") else BASE_DIR / "data"
+DATA_DIR = Path(os.getenv("DATA_DIR", _default_data)).resolve()
 UPLOAD_DIR = DATA_DIR / "uploads"
 WORK_DIR = DATA_DIR / "work"
 OUTPUT_DIR = DATA_DIR / "outputs"

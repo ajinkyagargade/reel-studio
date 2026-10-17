@@ -43,6 +43,12 @@ First upload downloads the Whisper model once (`small` ≈ 460 MB). Use `WHISPER
 
 Single-server mode: `cd frontend && npm run build`, then just run the backend; it serves the built app at http://localhost:8000.
 
+## Deploying on Vercel
+
+`vercel.json` (repo root) defines two services on one domain: the Python `backend` (served at `/api/*`) and the React `frontend` (everything else). Set `ANTHROPIC_API_KEY` in the Vercel project's environment variables.
+
+What works on Vercel: the **AI explainer** (text → full explanation). What needs a different host: video upload, transcription and reel rendering. They need ffmpeg, a persistent disk and long-running background jobs, which Vercel Functions don't provide (the backend stores its data in `/tmp` there, which is temporary and per-instance). Run the backend on a Docker host (Render, Railway, Fly.io...) and set `REACT_APP_API_URL` to its `/api` URL if you need those features.
+
 ## Using it
 
 1. **Upload** a video (pick the spoken language). Processing shows live progress.

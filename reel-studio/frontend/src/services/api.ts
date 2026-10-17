@@ -16,7 +16,10 @@ import {
   LogoSettings,
 } from "../types";
 
-export const API_BASE = process.env.REACT_APP_API_URL || "http://localhost:8000/api";
+// Production builds talk to the same origin ("/api", routed to the backend by vercel.json or by the backend itself
+// in single-server mode). Local `npm start` still defaults to the backend on port 8000. REACT_APP_API_URL overrides both.
+export const API_BASE =
+  process.env.REACT_APP_API_URL || (process.env.NODE_ENV === "production" ? "/api" : "http://localhost:8000/api");
 // Origin of the backend, used to turn "/api/..." media paths into absolute URLs.
 const API_ORIGIN = API_BASE.replace(/\/api\/?$/, "");
 
