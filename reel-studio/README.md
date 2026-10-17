@@ -43,11 +43,16 @@ First upload downloads the Whisper model once (`small` ≈ 460 MB). Use `WHISPER
 
 Single-server mode: `cd frontend && npm run build`, then just run the backend; it serves the built app at http://localhost:8000.
 
-## Deploying on Vercel
+## Deploying online: frontend on Vercel, backend on Render
 
-`vercel.json` (repo root) defines two services on one domain: the Python `backend` (served at `/api/*`) and the React `frontend` (everything else). Set `ANTHROPIC_API_KEY` in the Vercel project's environment variables.
+Vercel Functions have no ffmpeg, no persistent disk and a 4.5 MB request limit, so the backend (upload, Whisper, rendering) runs as a Docker container on a normal host. The React frontend runs on Vercel.
 
-What works on Vercel: the **AI explainer** (text → full explanation). What needs a different host: video upload, transcription and reel rendering. They need ffmpeg, a persistent disk and long-running background jobs, which Vercel Functions don't provide (the backend stores its data in `/tmp` there, which is temporary and per-instance). Run the backend on a Docker host (Render, Railway, Fly.io...) and set `REACT_APP_API_URL` to its `/api` URL if you need those features.
+1. **Backend on Render.** Dashboard → New → Blueprint → pick this repo (`render.yaml` is at the repo root, the image is `backend/Dockerfile`). Fill in `ANTHROPIC_API_KEY` and `CORS_ORIGINS` (your Vercel URL, e.g. `https://your-app.vercel.app`). Check `https://<your-service>.onrender.com/api/health`.
+2. **Frontend on Vercel.** `vercel.json` (repo root) deploys only the frontend. In the Vercel project → Settings → Environment Variables add `REACT_APP_API_URL` = `https://<your-service>.onrender.com/api`, then redeploy (it is read at build time).
+
+Notes for Render's free plan: it has little memory (`render.yaml` sets `WHISPER_MODEL=base` and one job worker), it sleeps after ~15 minutes idle (the first request is slow), and its disk is temporary, so uploads, projects and rendered videos are lost when it restarts. Use a paid plan with a persistent disk mounted at `/app/data` if you need to keep them.
+
+The same image runs anywhere Docker does: `docker build -t reel-studio-backend backend && docker run -p 8000:8000 -e ANTHROPIC_API_KEY=... reel-studio-backend`.
 
 ## Using it
 
