@@ -1,0 +1,8 @@
+starlette>=0.40
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+requests>=2.31
+pillow>=10.0
+faster-whisper>=1.0
+edge-tts>=6.1
+# optional offline voice fallback (needs espeak on Linux): pyttsx3
